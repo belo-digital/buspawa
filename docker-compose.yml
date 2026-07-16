@@ -63,7 +63,7 @@ services:
       AT_USERNAME: ${AT_USERNAME:-buspawa}
       AT_SENDER_ID: ${AT_SENDER_ID:-BUSPAWA}
       APP_PORT: 3000
-      CORS_ORIGIN: http://localhost
+      CORS_ORIGIN: http://localhost:3001
     ports:
       - "3000:3000"
 
