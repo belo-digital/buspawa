@@ -1,0 +1,105 @@
+/* @import url() FONT IMPORTS MUST ALWAYS BE AT THE VERY TOP OF THIS FILE, ABOVE THE TAILWIND IMPORTS — DO NOT DELETE THIS COMMENT */
+@import url('https://fonts.googleapis.com/css2?family=Mandali&display=swap');
+
+/* CRITICAL: THE FOLLOWING TAILWIND IMPORTS MUST NEVER BE DELETED OR REORDERED — DO NOT DELETE THIS COMMENT */
+@import 'tailwindcss/base';
+@import 'tailwindcss/components';
+@import 'tailwindcss/utilities';
+
+/* END TAILWIND IMPORTS — ALL OTHER CSS MUST GO BELOW THIS LINE */
+
+:root {
+  /* BusPawa dark teal · #146464 */
+  --primary: 180 66% 24%;
+  --primary-foreground: 40 30% 98%;
+  /* Off-white background, dark slate text */
+  --background: 40 20% 98%;
+  --foreground: 215 25% 20%;
+  --card: 0 0% 100%;
+  --card-foreground: 215 25% 20%;
+  --muted: 40 12% 94%;
+  --muted-foreground: 215 12% 45%;
+  --border: 215 15% 90%;
+  --input: 215 15% 88%;
+  --ring: 180 66% 24%;
+  /* Muted status colors */
+  --success: 152 40% 40%;
+  --warning: 38 70% 50%;
+  --danger: 0 60% 50%;
+  --radius: 0.5rem;
+}
+* {
+  font-family: "Mandali", sans-serif;
+  font-weight: 400;
+  font-style: normal;
+}
+.mandali-regular {
+  font-family: "Mandali", sans-serif;
+  font-weight: 400;
+  font-style: normal;
+}
+html, body, #root {
+  height: 100%;
+}
+body {
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+  -webkit-font-smoothing: antialiased;
+}
+/* Calm scrollbars for data-dense screens */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: hsl(215 15% 85%); border-radius: 999px; border: 2px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background: hsl(215 15% 75%); }
+/* 80 mm thermal paper: 72 mm printable surface, 4 mm device margin. */
+.thermal-ticket {
+  width: 72mm;
+  max-width: 100%;
+  padding: 3mm 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-variant-numeric: tabular-nums;
+}
+@media print {
+  @page {
+    size: 80mm auto;
+    margin: 4mm;
+  }
+  html,
+  body {
+    width: 80mm;
+    min-height: auto;
+    background: #fff !important;
+  }
+  body * {
+    visibility: hidden !important;
+  }
+  #thermal-ticket,
+  #thermal-ticket * {
+    visibility: visible !important;
+  }
+  #thermal-ticket {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 72mm !important;
+    max-width: 72mm !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+  .print-target,
+  .print-target * {
+    visibility: visible !important;
+  }
+  .print-target {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: min(100%, 180mm) !important;
+    margin: 0 !important;
+    box-shadow: none !important;
+  }
+}

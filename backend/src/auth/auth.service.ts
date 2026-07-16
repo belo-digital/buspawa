@@ -1,0 +1,74 @@
+import { Injectable, UnauthorizedException, ConflictException } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { JwtService } from '@nestjs/jwt';
+import * as bcrypt from 'bcrypt';
+import { User } from './entities/user.entity';
+import { Station } from './entities/station.entity';
+import { ServiceRoute } from './entities/route.entity';
+
+@Injectable()
+export class AuthService {
+  constructor(
+    @InjectRepository(User) private userRepo: Repository<User>,
+    @InjectRepository(Station) private stationRepo: Repository<Station>,
+    @InjectRepository(ServiceRoute) private routeRepo: Repository<ServiceRoute>,
+    private jwtService: JwtService,
+  ) {}
+
+  async register(data: { email: string; password: string; name: string; role: string; phone?: string }) {
+    const existing = await this.userRepo.findOne({ where: { email: data.email } });
+    if (existing) throw new ConflictException('Email already registered');
+
+    const hashedPassword = await bcrypt.hash(data.password, 10);
+    const user = this.userRepo.create({ ...data, password: hashedPassword });
+    await this.userRepo.save(user);
+
+    const token = this.generateToken(user);
+    return { user: this.sanitizeUser(user), token };
+  }
+
+  async login(email: string, password: string) {
+    const user = await this.userRepo.findOne({ where: { email } });
+    if (!user) throw new UnauthorizedException('Invalid credentials');
+
+    const valid = await bcrypt.compare(password, user.password);
+    if (!valid) throw new UnauthorizedException('Invalid credentials');
+
+    const token = this.generateToken(user);
+    return { user: this.sanitizeUser(user), token };
+  }
+
+  async getProfile(userId: string) {
+    const user = await this.userRepo.findOne({ where: { id: userId } });
+    if (!user) throw new UnauthorizedException('User not found');
+    return this.sanitizeUser(user);
+  }
+
+  async getStations() {
+    return this.stationRepo.find({ order: { name: 'ASC' } });
+  }
+
+  async getRoutes() {
+    return this.routeRepo.find({ order: { origin: 'ASC' } });
+  }
+
+  async createStation(data: Partial<Station>) {
+    const station = this.stationRepo.create(data);
+    return this.stationRepo.save(station);
+  }
+
+  async createRoute(data: Partial<ServiceRoute>) {
+    const route = this.routeRepo.create(data);
+    return this.routeRepo.save(route);
+  }
+
+  private generateToken(user: User): string {
+    return this.jwtService.sign({ sub: user.id, email: user.email, role: user.role });
+  }
+
+  private sanitizeUser(user: User) {
+    const { password, ...result } = user;
+    return result;
+  }
+}
