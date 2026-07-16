@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import './globals.css';
 import { Mandali } from "next/font/google";
 import { cn } from "@/lib/utils";
+import { AuthProvider } from "@/lib/auth";
 
 const mandali = Mandali({weight:'400', subsets:['latin'], variable:'--font-sans'});
 
@@ -21,7 +22,9 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={cn("font-sans", mandali.variable)}>
-      <body>{children}</body>
+      <body>
+        <AuthProvider>{children}</AuthProvider>
+      </body>
     </html>
   );
 }
