@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useAuth } from '@/lib/auth';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 
 const PRIMARY_LOGO_URL = '/primary-logo.svg';
 const LOGIN_BACKGROUND_URL = '/a672894b-d51f-41e9-88c7-a533429d1b93.jpg';
@@ -22,7 +23,7 @@ export default function LoginPage() {
     setError('');
     setLoading(true);
     try {
-      await login(email, password);
+      await login(email, password, rememberMe);
       router.push('/dashboard');
     } catch (err: any) {
       setError(err.response?.data?.message || 'Invalid credentials');
@@ -142,10 +143,16 @@ export default function LoginPage() {
                   type="checkbox"
                   checked={rememberMe}
                   onChange={(e) => setRememberMe(e.target.checked)}
-                  className="h-4 w-4 rounded border-slate-300 focus:ring-[hsl(180,67%,24%)]"
+                  className="h-4 w-4 rounded border-slate-300"
                 />
                 Remember me
               </label>
+
+              <div className="flex items-center justify-end">
+                <Link href="/login/forgot" className="text-sm font-medium text-[hsl(180,67%,24%)] hover:underline">
+                  Forgot password?
+                </Link>
+              </div>
 
               <button
                 type="submit"

@@ -33,6 +33,12 @@ export class User {
   @Column({ type: 'varchar', nullable: true })
   stationId: string;
 
+  @Column({ type: 'varchar', nullable: true })
+  resetToken: string | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  resetTokenExpiry: Date | null;
+
   @OneToMany(() => Ticket, (ticket) => ticket.bookedBy)
   tickets: Ticket[];
 

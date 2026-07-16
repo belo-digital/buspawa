@@ -17,9 +17,11 @@ interface AuthContextType {
   user: User | null;
   token: string | null;
   isLoading: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string, rememberMe?: boolean) => Promise<void>;
   register: (data: { email: string; password: string; name: string; role: string; phone?: string }) => Promise<void>;
   logout: () => void;
+  forgotPassword: (email: string) => Promise<{ message: string; resetToken?: string }>;
+  resetPassword: (token: string, newPassword: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -30,8 +32,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const savedToken = localStorage.getItem('buspawa_token');
-    const savedUser = localStorage.getItem('buspawa_user');
+    const savedToken = localStorage.getItem('buspawa_token') || sessionStorage.getItem('buspawa_token');
+    const savedUser = localStorage.getItem('buspawa_user') || sessionStorage.getItem('buspawa_user');
     if (savedToken && savedUser) {
       setToken(savedToken);
       setUser(JSON.parse(savedUser));
@@ -39,11 +41,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsLoading(false);
   }, []);
 
-  const login = useCallback(async (email: string, password: string) => {
+  const login = useCallback(async (email: string, password: string, rememberMe: boolean = true) => {
     const res = await axios.post(`${API_URL}/auth/login`, { email, password });
     const { user: u, token: t } = res.data;
-    localStorage.setItem('buspawa_token', t);
-    localStorage.setItem('buspawa_user', JSON.stringify(u));
+    if (rememberMe) {
+      localStorage.setItem('buspawa_token', t);
+      localStorage.setItem('buspawa_user', JSON.stringify(u));
+    } else {
+      sessionStorage.setItem('buspawa_token', t);
+      sessionStorage.setItem('buspawa_user', JSON.stringify(u));
+    }
     setToken(t);
     setUser(u);
   }, []);
@@ -60,12 +67,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(() => {
     localStorage.removeItem('buspawa_token');
     localStorage.removeItem('buspawa_user');
+    sessionStorage.removeItem('buspawa_token');
+    sessionStorage.removeItem('buspawa_user');
     setToken(null);
     setUser(null);
   }, []);
 
+  const forgotPassword = useCallback(async (email: string) => {
+    const res = await axios.post(`${API_URL}/auth/forgot-password`, { email });
+    return res.data;
+  }, []);
+
+  const resetPassword = useCallback(async (token: string, newPassword: string) => {
+    await axios.post(`${API_URL}/auth/reset-password`, { token, newPassword });
+  }, []);
+
   return (
-    <AuthContext.Provider value={{ user, token, isLoading, login, register, logout }}>
+    <AuthContext.Provider value={{ user, token, isLoading, login, register, logout, forgotPassword, resetPassword }}>
       {children}
     </AuthContext.Provider>
   );

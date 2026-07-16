@@ -1,8 +1,9 @@
-import { Injectable, UnauthorizedException, ConflictException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, ConflictException, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
+import { randomBytes } from 'crypto';
 import { User } from './entities/user.entity';
 import { Station } from './entities/station.entity';
 import { ServiceRoute } from './entities/route.entity';
@@ -61,6 +62,40 @@ export class AuthService {
   async createRoute(data: Partial<ServiceRoute>) {
     const route = this.routeRepo.create(data);
     return this.routeRepo.save(route);
+  }
+
+  async forgotPassword(email: string) {
+    const user = await this.userRepo.findOne({ where: { email } });
+    if (!user) {
+      return { message: 'If an account exists with that email, a reset link has been sent.' };
+    }
+
+    const resetToken = randomBytes(32).toString('hex');
+    const resetTokenExpiry = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+    user.resetToken = resetToken;
+    user.resetTokenExpiry = resetTokenExpiry;
+    await this.userRepo.save(user);
+
+    return {
+      message: 'If an account exists with that email, a reset link has been sent.',
+      resetToken,
+    };
+  }
+
+  async resetPassword(token: string, newPassword: string) {
+    const user = await this.userRepo.findOne({ where: { resetToken: token } });
+    if (!user) throw new BadRequestException('Invalid or expired reset token');
+    if (!user.resetTokenExpiry || user.resetTokenExpiry < new Date()) {
+      throw new BadRequestException('Invalid or expired reset token');
+    }
+
+    user.password = await bcrypt.hash(newPassword, 10);
+    user.resetToken = null;
+    user.resetTokenExpiry = null;
+    await this.userRepo.save(user);
+
+    return { message: 'Password reset successfully' };
   }
 
   private generateToken(user: User): string {

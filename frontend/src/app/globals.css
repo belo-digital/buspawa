@@ -88,3 +88,8 @@
 body {
   font-family: 'Mandali', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
+
+/* Teal checkbox */
+input[type="checkbox"] {
+  accent-color: hsl(180, 67%, 24%);
+}
