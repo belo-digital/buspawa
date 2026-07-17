@@ -11,28 +11,34 @@ interface Employee {
   role: string;
   branch: string;
   salary: number;
-  employmentStatus: string;
+  employmentStatus: 'active' | 'on_leave' | 'terminated';
   dateJoined: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 interface EmployeeDocument {
   id: string;
+  employeeId: string;
   documentType: string;
   documentNumber: string;
   expiryDate: string;
+  status: 'valid' | 'expiring_soon' | 'expired';
+  fileUrl: string;
+  createdAt: string;
+  employee: { id: string; name: string; role: string; branch: string };
+}
+
+interface EmployeeStats {
+  total: number;
+  active: number;
+  onLeave: number;
+  byRole: { role: string; count: string }[];
 }
 
 interface ComplianceResult {
   compliant: boolean;
-  missingDocuments: string[];
-}
-
-interface ExpiringDocument {
-  employeeName: string;
-  employeeId: string;
-  documentType: string;
-  expiryDate: string;
-  status: 'valid' | 'expiring_soon' | 'expired';
+  issues: string[];
 }
 
 const ROLES = [
@@ -55,19 +61,10 @@ const DOCUMENT_TYPES = [
   { value: 'certificate_of_good_conduct', label: 'Certificate of Good Conduct' },
 ] as const;
 
-const ROLE_BADGE_MAP: Record<string, string> = {
-  driver: 'Drivers',
-  conductor: 'Conductors',
-  booking_agent: 'Agents',
-  hr_officer: 'HR',
-  finance_officer: 'Finance',
-  auditor: 'Audit',
-};
-
 const STATUS_COLORS: Record<string, string> = {
   active: 'bg-emerald-100 text-emerald-700',
-  inactive: 'bg-gray-100 text-gray-600',
-  suspended: 'bg-red-100 text-red-700',
+  on_leave: 'bg-yellow-100 text-yellow-700',
+  terminated: 'bg-red-100 text-red-700',
 };
 
 const DOC_STATUS_COLORS: Record<string, string> = {
@@ -84,12 +81,17 @@ function formatCurrency(amount: number) {
   return new Intl.NumberFormat('en-KE', { style: 'currency', currency: 'KES', maximumFractionDigits: 0 }).format(amount);
 }
 
+function capitalize(s: string) {
+  return s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 type Tab = 'staff' | 'compliance';
 
 export default function EmployeesPage() {
   const [activeTab, setActiveTab] = useState<Tab>('staff');
   const [employees, setEmployees] = useState<Employee[]>([]);
-  const [expiringDocs, setExpiringDocs] = useState<ExpiringDocument[]>([]);
+  const [stats, setStats] = useState<EmployeeStats | null>(null);
+  const [expiringDocs, setExpiringDocs] = useState<EmployeeDocument[]>([]);
   const [loading, setLoading] = useState(true);
   const [roleFilter, setRoleFilter] = useState<string>('All');
   const [searchQuery, setSearchQuery] = useState('');
@@ -121,8 +123,12 @@ export default function EmployeesPage() {
   const fetchEmployees = useCallback(async () => {
     try {
       setLoading(true);
-      const data = await api.get('/employees');
-      setEmployees(data);
+      const [empData, statsData] = await Promise.all([
+        api.get('/employees'),
+        api.get('/employees/stats'),
+      ]);
+      setEmployees(empData);
+      setStats(statsData);
     } catch {
       setError('Failed to load employees');
     } finally {
@@ -148,11 +154,12 @@ export default function EmployeesPage() {
     setSelectedEmployee(emp);
     setDocsLoading(true);
     try {
-      const [docs, comp] = await Promise.all([
-        api.get(`/employees/${emp.id}/documents`),
+      const [detail, comp] = await Promise.all([
+        api.get(`/employees/${emp.id}`),
         api.get(`/employees/${emp.id}/compliance`),
       ]);
-      setEmployeeDocs(docs);
+      setSelectedEmployee(detail);
+      setEmployeeDocs(detail.documents || []);
       setCompliance(comp);
     } catch {
       // silent
@@ -167,7 +174,11 @@ export default function EmployeesPage() {
     setError('');
     try {
       await api.post('/employees', {
-        ...newEmployee,
+        name: newEmployee.name,
+        email: newEmployee.email,
+        phone: newEmployee.phone,
+        role: newEmployee.role,
+        branch: newEmployee.branch,
         salary: Number(newEmployee.salary),
       });
       setShowAddForm(false);
@@ -185,15 +196,19 @@ export default function EmployeesPage() {
     if (!selectedEmployee) return;
     setSubmitting(true);
     try {
-      await api.post(`/employees/${selectedEmployee.id}/documents`, newDocument);
+      await api.post(`/employees/${selectedEmployee.id}/documents`, {
+        documentType: newDocument.documentType,
+        documentNumber: newDocument.documentNumber,
+        expiryDate: newDocument.expiryDate,
+      });
       setShowAddDocForm(false);
       setNewDocument({ documentType: 'psv_badge', documentNumber: '', expiryDate: '' });
-      // Refresh details
-      const [docs, comp] = await Promise.all([
-        api.get(`/employees/${selectedEmployee.id}/documents`),
+      const [detail, comp] = await Promise.all([
+        api.get(`/employees/${selectedEmployee.id}`),
         api.get(`/employees/${selectedEmployee.id}/compliance`),
       ]);
-      setEmployeeDocs(docs);
+      setSelectedEmployee(detail);
+      setEmployeeDocs(detail.documents || []);
       setCompliance(comp);
     } catch {
       setError('Failed to add document');
@@ -242,7 +257,7 @@ export default function EmployeesPage() {
       {/* Tabs */}
       <div className="flex gap-1 rounded-lg bg-muted p-1 w-fit">
         {([
-          { key: 'staff' as Tab, label: 'Staff List' },
+          { key: 'staff' as Tab, label: 'Staff' },
           { key: 'compliance' as Tab, label: 'Compliance' },
         ]).map((tab) => (
           <button
@@ -265,6 +280,30 @@ export default function EmployeesPage() {
           <button onClick={() => setError('')} className="ml-2 font-medium hover:underline">
             Dismiss
           </button>
+        </div>
+      )}
+
+      {/* Stats Cards */}
+      {activeTab === 'staff' && stats && (
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+          <div className="rounded-xl border border-border bg-card p-4">
+            <p className="text-xs text-muted-foreground">Total Staff</p>
+            <p className="mt-1 text-2xl font-bold text-foreground">{stats.total}</p>
+          </div>
+          <div className="rounded-xl border border-border bg-card p-4">
+            <p className="text-xs text-muted-foreground">Active</p>
+            <p className="mt-1 text-2xl font-bold text-emerald-600">{stats.active}</p>
+          </div>
+          <div className="rounded-xl border border-border bg-card p-4">
+            <p className="text-xs text-muted-foreground">On Leave</p>
+            <p className="mt-1 text-2xl font-bold text-yellow-600">{stats.onLeave}</p>
+          </div>
+          {stats.byRole.map((r) => (
+            <div key={r.role} className="rounded-xl border border-border bg-card p-4">
+              <p className="text-xs text-muted-foreground">{capitalize(r.role)}</p>
+              <p className="mt-1 text-2xl font-bold text-foreground">{r.count}</p>
+            </div>
+          ))}
         </div>
       )}
 
@@ -334,12 +373,12 @@ export default function EmployeesPage() {
                         {emp.name.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()}
                       </div>
                       <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${STATUS_COLORS[emp.employmentStatus] || 'bg-gray-100 text-gray-600'}`}>
-                        {emp.employmentStatus}
+                        {capitalize(emp.employmentStatus)}
                       </span>
                     </div>
                     <div className="mt-3">
                       <p className="font-semibold text-foreground text-sm">{emp.name}</p>
-                      <p className="text-xs text-muted-foreground mt-0.5">{emp.role.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">{capitalize(emp.role)}</p>
                     </div>
                     <div className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
                       <svg className="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -367,7 +406,6 @@ export default function EmployeesPage() {
                       <th className="px-4 py-3 text-left font-medium text-muted-foreground">Role</th>
                       <th className="px-4 py-3 text-left font-medium text-muted-foreground">Branch</th>
                       <th className="px-4 py-3 text-left font-medium text-muted-foreground">Phone</th>
-                      <th className="px-4 py-3 text-left font-medium text-muted-foreground">Salary</th>
                       <th className="px-4 py-3 text-left font-medium text-muted-foreground">Status</th>
                     </tr>
                   </thead>
@@ -389,13 +427,12 @@ export default function EmployeesPage() {
                             </div>
                           </div>
                         </td>
-                        <td className="px-4 py-3 text-muted-foreground capitalize">{emp.role.replace(/_/g, ' ')}</td>
+                        <td className="px-4 py-3 text-muted-foreground">{capitalize(emp.role)}</td>
                         <td className="px-4 py-3 text-muted-foreground">{emp.branch}</td>
                         <td className="px-4 py-3 text-muted-foreground">{emp.phone}</td>
-                        <td className="px-4 py-3 text-muted-foreground">{formatCurrency(emp.salary)}</td>
                         <td className="px-4 py-3">
                           <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[emp.employmentStatus] || 'bg-gray-100 text-gray-600'}`}>
-                            {emp.employmentStatus}
+                            {capitalize(emp.employmentStatus)}
                           </span>
                         </td>
                       </tr>
@@ -425,9 +462,9 @@ export default function EmployeesPage() {
             </div>
           ) : (
             <div className="space-y-3">
-              {expiringDocs.map((doc, idx) => (
+              {expiringDocs.map((doc) => (
                 <div
-                  key={idx}
+                  key={doc.id}
                   className="rounded-xl border border-border bg-card p-4 transition-colors hover:border-primary/20"
                 >
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -438,9 +475,9 @@ export default function EmployeesPage() {
                         </svg>
                       </div>
                       <div>
-                        <p className="font-medium text-foreground">{doc.employeeName}</p>
+                        <p className="font-medium text-foreground">{doc.employee.name}</p>
                         <p className="text-xs text-muted-foreground mt-0.5">
-                          {DOCUMENT_TYPES.find((d) => d.value === doc.documentType)?.label || doc.documentType.replace(/_/g, ' ')}
+                          {capitalize(doc.documentType)} &mdash; {doc.employee.role} ({doc.employee.branch})
                         </p>
                       </div>
                     </div>
@@ -450,7 +487,7 @@ export default function EmployeesPage() {
                         <p className="text-sm font-medium text-foreground">{formatDate(doc.expiryDate)}</p>
                       </div>
                       <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium ${DOC_STATUS_COLORS[doc.status]}`}>
-                        {doc.status.replace(/_/g, ' ')}
+                        {capitalize(doc.status)}
                       </span>
                     </div>
                   </div>
@@ -486,7 +523,7 @@ export default function EmployeesPage() {
                 </div>
                 <div>
                   <p className="text-lg font-semibold text-foreground">{selectedEmployee.name}</p>
-                  <p className="text-sm text-muted-foreground capitalize">{selectedEmployee.role.replace(/_/g, ' ')}</p>
+                  <p className="text-sm text-muted-foreground">{capitalize(selectedEmployee.role)}</p>
                 </div>
               </div>
 
@@ -496,7 +533,7 @@ export default function EmployeesPage() {
                   { label: 'Phone', value: selectedEmployee.phone },
                   { label: 'Branch', value: selectedEmployee.branch },
                   { label: 'Salary', value: formatCurrency(selectedEmployee.salary) },
-                  { label: 'Status', value: selectedEmployee.employmentStatus },
+                  { label: 'Status', value: capitalize(selectedEmployee.employmentStatus) },
                   { label: 'Joined', value: formatDate(selectedEmployee.dateJoined) },
                 ].map((item) => (
                   <div key={item.label}>
@@ -509,7 +546,7 @@ export default function EmployeesPage() {
               {/* Compliance Status */}
               {docsLoading ? (
                 <div className="flex items-center justify-center py-8">
-                  <div className="h-6 w-6 animate-spin rounded-full border-3 border-primary border-t-transparent" />
+                  <div className="h-6 w-6 animate-spin rounded-full border-[3px] border-primary border-t-transparent" />
                 </div>
               ) : compliance && (
                 <div>
@@ -519,16 +556,16 @@ export default function EmployeesPage() {
                       {compliance.compliant ? 'Compliant' : 'Non-Compliant'}
                     </span>
                   </div>
-                  {!compliance.compliant && compliance.missingDocuments.length > 0 && (
+                  {!compliance.compliant && compliance.issues.length > 0 && (
                     <div className="rounded-lg border border-red-200 bg-red-50 p-3">
-                      <p className="text-xs font-medium text-red-700 mb-1.5">Missing documents:</p>
+                      <p className="text-xs font-medium text-red-700 mb-1.5">Issues:</p>
                       <ul className="space-y-1">
-                        {compliance.missingDocuments.map((doc) => (
-                          <li key={doc} className="flex items-center gap-1.5 text-xs text-red-600">
+                        {compliance.issues.map((issue, i) => (
+                          <li key={i} className="flex items-center gap-1.5 text-xs text-red-600">
                             <svg className="h-3 w-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                               <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126z" />
                             </svg>
-                            {doc.replace(/_/g, ' ')}
+                            {issue}
                           </li>
                         ))}
                       </ul>
@@ -554,7 +591,7 @@ export default function EmployeesPage() {
 
                 {docsLoading ? (
                   <div className="flex items-center justify-center py-8">
-                    <div className="h-6 w-6 animate-spin rounded-full border-3 border-primary border-t-transparent" />
+                    <div className="h-6 w-6 animate-spin rounded-full border-[3px] border-primary border-t-transparent" />
                   </div>
                 ) : employeeDocs.length === 0 ? (
                   <div className="rounded-lg border border-border bg-muted/50 py-6 text-center">
@@ -566,14 +603,17 @@ export default function EmployeesPage() {
                       <div key={doc.id} className="rounded-lg border border-border p-3">
                         <div className="flex items-center justify-between">
                           <div>
-                            <p className="text-sm font-medium text-foreground">
-                              {DOCUMENT_TYPES.find((d) => d.value === doc.documentType)?.label || doc.documentType.replace(/_/g, ' ')}
-                            </p>
+                            <p className="text-sm font-medium text-foreground">{capitalize(doc.documentType)}</p>
                             <p className="text-xs text-muted-foreground mt-0.5">No. {doc.documentNumber}</p>
                           </div>
-                          <div className="text-right">
-                            <p className="text-xs text-muted-foreground">Expires</p>
-                            <p className="text-sm font-medium text-foreground">{formatDate(doc.expiryDate)}</p>
+                          <div className="flex items-center gap-3">
+                            <div className="text-right">
+                              <p className="text-xs text-muted-foreground">Expires</p>
+                              <p className="text-sm font-medium text-foreground">{formatDate(doc.expiryDate)}</p>
+                            </div>
+                            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${DOC_STATUS_COLORS[doc.status]}`}>
+                              {capitalize(doc.status)}
+                            </span>
                           </div>
                         </div>
                       </div>

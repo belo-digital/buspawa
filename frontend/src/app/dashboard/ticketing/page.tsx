@@ -3,10 +3,17 @@
 import { useEffect, useState, useCallback } from 'react';
 import api from '@/lib/api';
 
+interface Vehicle {
+  id: string;
+  registration: string;
+  make: string;
+  model: string;
+}
+
 interface Trip {
   id: string;
-  route: string;
   vehicleId: string;
+  route: string;
   departureTime: string;
   arrivalTime: string;
   travelDate: string;
@@ -14,26 +21,46 @@ interface Trip {
   totalSeats: number;
   bookedSeats: number;
   status: string;
+  vehicle: Vehicle;
 }
 
-interface Seat {
+interface SeatMap {
+  id: string;
+  tripId: string;
   seatNumber: string;
   status: 'free' | 'held' | 'confirmed';
-  heldBy?: string;
+  heldByUserId: string | null;
+  heldByPhone: string | null;
+  holdExpiresAt: string | null;
+  ticketRef: string | null;
+  heldFare: number | null;
+  holdVersion: number;
 }
 
 interface Ticket {
   id: string;
+  ticketRef: string;
   tripId: string;
-  seatNumber: string;
+  bookedById: string;
   passengerName: string;
   passengerPhone: string;
-  paymentMethod: string;
+  seatNumber: string;
+  ticketClass: string;
   fare: number;
+  paymentMethod: string;
   status: string;
+  bookingCode: string;
+  mpesaReceipt: string | null;
+  qrCodeData: string | null;
+  verifiedByConductorId: string | null;
+  verifiedAt: string | null;
   createdAt: string;
-  route?: string;
-  travelDate?: string;
+  updatedAt: string;
+  trip: {
+    route: string;
+    departureTime: string;
+    travelDate: string;
+  };
 }
 
 export default function TicketingPage() {
@@ -43,7 +70,7 @@ export default function TicketingPage() {
   const [loadingTickets, setLoadingTickets] = useState(true);
 
   const [selectedTrip, setSelectedTrip] = useState<Trip | null>(null);
-  const [seats, setSeats] = useState<Seat[]>([]);
+  const [seats, setSeats] = useState<SeatMap[]>([]);
   const [loadingSeats, setLoadingSeats] = useState(false);
   const [selectedSeat, setSelectedSeat] = useState<string | null>(null);
   const [holdLoading, setHoldLoading] = useState(false);
@@ -55,7 +82,7 @@ export default function TicketingPage() {
     paymentMethod: 'Cash',
   });
   const [bookingLoading, setBookingLoading] = useState(false);
-  const [bookingSuccess, setBookingSuccess] = useState(false);
+  const [bookingSuccess, setBookingSuccess] = useState<Ticket | null>(null);
   const [bookingError, setBookingError] = useState('');
 
   const [error, setError] = useState('');
@@ -75,7 +102,7 @@ export default function TicketingPage() {
   const fetchTickets = useCallback(async () => {
     try {
       setLoadingTickets(true);
-      const data = await api.get('/tickets?status=booked');
+      const data = await api.get('/tickets');
       setTickets(Array.isArray(data) ? data : data.tickets || []);
     } catch {
       // silent
@@ -93,7 +120,7 @@ export default function TicketingPage() {
     setSelectedTrip(trip);
     setSelectedSeat(null);
     setShowBookingForm(false);
-    setBookingSuccess(false);
+    setBookingSuccess(null);
     setBookingError('');
     setBookingForm({ passengerName: '', passengerPhone: '', paymentMethod: 'Cash' });
     try {
@@ -111,13 +138,15 @@ export default function TicketingPage() {
     if (!selectedTrip) return;
     try {
       setHoldLoading(true);
-      await api.post('/tickets/hold', { tripId: selectedTrip.id, seatNumber });
+      const result = await api.post('/tickets/hold', { tripId: selectedTrip.id, seatNumber });
       setSeats((prev) =>
-        prev.map((s) => (s.seatNumber === seatNumber ? { ...s, status: 'held' as const } : s))
+        prev.map((s) =>
+          s.seatNumber === seatNumber ? { ...s, status: 'held' as const, heldByUserId: 'current', holdExpiresAt: result.holdExpiresAt } : s
+        )
       );
       setSelectedSeat(seatNumber);
       setShowBookingForm(true);
-      setBookingSuccess(false);
+      setBookingSuccess(null);
       setBookingError('');
     } catch {
       setError('Failed to hold seat. It may already be taken.');
@@ -132,7 +161,7 @@ export default function TicketingPage() {
     try {
       setBookingLoading(true);
       setBookingError('');
-      await api.post('/tickets/book', {
+      const ticket = await api.post('/tickets/book', {
         tripId: selectedTrip.id,
         seatNumber: selectedSeat,
         passengerName: bookingForm.passengerName,
@@ -141,11 +170,14 @@ export default function TicketingPage() {
         fare: selectedTrip.baseFare,
       });
       setSeats((prev) =>
-        prev.map((s) => (s.seatNumber === selectedSeat ? { ...s, status: 'confirmed' as const } : s))
+        prev.map((s) =>
+          s.seatNumber === selectedSeat ? { ...s, status: 'confirmed' as const, ticketRef: ticket.ticketRef } : s
+        )
       );
-      setBookingSuccess(true);
+      setBookingSuccess(ticket);
       setShowBookingForm(false);
       setSelectedSeat(null);
+      setBookingForm({ passengerName: '', passengerPhone: '', paymentMethod: 'Cash' });
       fetchTickets();
     } catch (err: any) {
       setBookingError(err.response?.data?.message || 'Booking failed');
@@ -163,7 +195,7 @@ export default function TicketingPage() {
       case 'confirmed':
         return 'border-red-400 bg-red-50 cursor-not-allowed';
       default:
-        return 'border-border bg-muted';
+        return 'border-gray-300 bg-gray-100';
     }
   };
 
@@ -171,13 +203,13 @@ export default function TicketingPage() {
     const styles: Record<string, string> = {
       scheduled: 'bg-primary/10 text-primary',
       ongoing: 'bg-emerald-100 text-emerald-700',
-      completed: 'bg-muted text-muted-foreground',
+      completed: 'bg-gray-100 text-gray-600',
       cancelled: 'bg-red-100 text-red-700',
       booked: 'bg-emerald-100 text-emerald-700',
       held: 'bg-amber-100 text-amber-700',
     };
     return (
-      <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${styles[status] || 'bg-muted text-muted-foreground'}`}>
+      <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${styles[status] || 'bg-gray-100 text-gray-600'}`}>
         {status.charAt(0).toUpperCase() + status.slice(1)}
       </span>
     );
@@ -203,8 +235,7 @@ export default function TicketingPage() {
   const formatCurrency = (n: number) =>
     new Intl.NumberFormat('en-KE', { style: 'currency', currency: 'KES', minimumFractionDigits: 0 }).format(n);
 
-  // Seat map layout: left (1,2) aisle right (3) for 2+1, or left (1,2) aisle right (3,4) for 2+2
-  const buildRows = (seatList: Seat[]) => {
+  const buildRows = (seatList: SeatMap[]) => {
     const sorted = [...seatList].sort((a, b) => {
       const na = parseInt(a.seatNumber.replace(/\D/g, ''), 10);
       const nb = parseInt(b.seatNumber.replace(/\D/g, ''), 10);
@@ -213,12 +244,12 @@ export default function TicketingPage() {
     const is2x1 = sorted.length <= 33;
     const colsPerSide = is2x1 ? [2, 1] : [2, 2];
     const totalCols = colsPerSide[0] + colsPerSide[1];
-    const rows: (Seat | null)[][] = [];
+    const rows: (SeatMap | null)[][] = [];
     for (let i = 0; i < sorted.length; i += totalCols) {
-      const row: (Seat | null)[] = [];
+      const row: (SeatMap | null)[] = [];
       for (let j = 0; j < totalCols; j++) {
         row.push(sorted[i + j] || null);
-        if (j === colsPerSide[0] - 1) row.push(null); // aisle
+        if (j === colsPerSide[0] - 1) row.push(null);
       }
       rows.push(row);
     }
@@ -228,8 +259,8 @@ export default function TicketingPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold text-foreground">Ticketing</h1>
-        <p className="text-sm text-muted-foreground mt-1">Manage trip bookings and seat reservations</p>
+        <h1 className="text-2xl font-semibold text-gray-900">Ticketing</h1>
+        <p className="text-sm text-gray-500 mt-1">Manage trip bookings and seat reservations</p>
       </div>
 
       {error && (
@@ -239,28 +270,27 @@ export default function TicketingPage() {
         </div>
       )}
 
-      {/* Seat Map View */}
       {selectedTrip && (
-        <div className="rounded-xl border border-border bg-card">
-          <div className="flex items-center justify-between border-b border-border px-4 py-3">
+        <div className="rounded-xl border border-gray-200 bg-white shadow-sm">
+          <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3">
             <div>
-              <h2 className="text-lg font-semibold text-foreground">{selectedTrip.route}</h2>
-              <p className="text-xs text-muted-foreground">
+              <h2 className="text-lg font-semibold text-gray-900">{selectedTrip.route}</h2>
+              <p className="text-xs text-gray-500">
                 {formatDate(selectedTrip.travelDate)} &middot; {formatTime(selectedTrip.departureTime)}
               </p>
+              <p className="text-xs text-gray-400 mt-0.5">{selectedTrip.vehicle.registration} &middot; {selectedTrip.vehicle.make} {selectedTrip.vehicle.model}</p>
             </div>
             <button
-              onClick={() => { setSelectedTrip(null); setShowBookingForm(false); setBookingSuccess(false); }}
-              className="rounded-lg border border-border px-3 py-1.5 text-sm text-muted-foreground hover:bg-muted transition-colors"
+              onClick={() => { setSelectedTrip(null); setShowBookingForm(false); setBookingSuccess(null); }}
+              className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-50 transition-colors"
             >
               Back to trips
             </button>
           </div>
 
           <div className="flex flex-col lg:flex-row gap-6 p-4 md:p-6">
-            {/* Seat Map */}
             <div className="flex-1">
-              <div className="mb-4 flex items-center gap-4 text-xs text-muted-foreground">
+              <div className="mb-4 flex items-center gap-4 text-xs text-gray-500">
                 <span className="flex items-center gap-1.5">
                   <span className="inline-block h-3 w-3 rounded border-2 border-emerald-400 bg-emerald-50" /> Free
                 </span>
@@ -272,7 +302,7 @@ export default function TicketingPage() {
                 </span>
               </div>
 
-              <div className="rounded-lg border border-border bg-muted/30 p-4">
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
                 <div className="mb-3 text-center">
                   <span className="inline-block rounded-t-lg bg-primary/10 px-6 py-1 text-xs font-medium text-primary">
                     Driver
@@ -322,77 +352,82 @@ export default function TicketingPage() {
                 )}
               </div>
 
-              <p className="mt-2 text-center text-xs text-muted-foreground">
+              <p className="mt-2 text-center text-xs text-gray-500">
                 {selectedTrip.totalSeats - selectedTrip.bookedSeats} seats available of {selectedTrip.totalSeats}
               </p>
             </div>
 
-            {/* Booking Form / Info */}
             <div className="w-full lg:w-80 shrink-0">
-              <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-4">
-                <h3 className="font-medium text-foreground">Trip Details</h3>
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 space-y-4">
+                <h3 className="font-medium text-gray-900">Trip Details</h3>
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">Route</span>
-                    <span className="font-medium text-foreground">{selectedTrip.route}</span>
+                    <span className="text-gray-500">Route</span>
+                    <span className="font-medium text-gray-900">{selectedTrip.route}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">Date</span>
-                    <span className="font-medium text-foreground">{formatDate(selectedTrip.travelDate)}</span>
+                    <span className="text-gray-500">Date</span>
+                    <span className="font-medium text-gray-900">{formatDate(selectedTrip.travelDate)}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">Departure</span>
-                    <span className="font-medium text-foreground">{formatTime(selectedTrip.departureTime)}</span>
+                    <span className="text-gray-500">Departure</span>
+                    <span className="font-medium text-gray-900">{formatTime(selectedTrip.departureTime)}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">Fare</span>
+                    <span className="text-gray-500">Vehicle</span>
+                    <span className="font-medium text-gray-900">{selectedTrip.vehicle.registration}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Fare</span>
                     <span className="font-medium text-primary">{formatCurrency(selectedTrip.baseFare)}</span>
                   </div>
                 </div>
 
                 {bookingSuccess && (
                   <div className="rounded-lg bg-emerald-50 border border-emerald-200 p-3 text-sm text-emerald-700">
-                    Booking confirmed successfully!
+                    <p className="font-medium mb-1">Booking confirmed!</p>
+                    <p>Ticket Ref: <span className="font-mono font-semibold">{bookingSuccess.ticketRef}</span></p>
+                    <p>Booking Code: <span className="font-mono font-semibold">{bookingSuccess.bookingCode}</span></p>
                   </div>
                 )}
 
                 {showBookingForm && selectedSeat && (
-                  <form onSubmit={submitBooking} className="space-y-3 pt-2 border-t border-border">
+                  <form onSubmit={submitBooking} className="space-y-3 pt-2 border-t border-gray-200">
                     <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium text-foreground">Book Seat {selectedSeat}</span>
+                      <span className="text-sm font-medium text-gray-900">Book Seat {selectedSeat}</span>
                       <span className="text-sm font-semibold text-primary">{formatCurrency(selectedTrip.baseFare)}</span>
                     </div>
 
                     <div>
-                      <label className="mb-1 block text-xs font-medium text-muted-foreground">Passenger Name</label>
+                      <label className="mb-1 block text-xs font-medium text-gray-500">Passenger Name</label>
                       <input
                         type="text"
                         required
                         value={bookingForm.passengerName}
                         onChange={(e) => setBookingForm((p) => ({ ...p, passengerName: e.target.value }))}
-                        className="flex h-9 w-full rounded-lg border border-input bg-background px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
+                        className="flex h-9 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
                         placeholder="Full name"
                       />
                     </div>
 
                     <div>
-                      <label className="mb-1 block text-xs font-medium text-muted-foreground">Phone Number</label>
+                      <label className="mb-1 block text-xs font-medium text-gray-500">Phone Number</label>
                       <input
                         type="tel"
                         required
                         value={bookingForm.passengerPhone}
                         onChange={(e) => setBookingForm((p) => ({ ...p, passengerPhone: e.target.value }))}
-                        className="flex h-9 w-full rounded-lg border border-input bg-background px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
+                        className="flex h-9 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
                         placeholder="0700 000 000"
                       />
                     </div>
 
                     <div>
-                      <label className="mb-1 block text-xs font-medium text-muted-foreground">Payment Method</label>
+                      <label className="mb-1 block text-xs font-medium text-gray-500">Payment Method</label>
                       <select
                         value={bookingForm.paymentMethod}
                         onChange={(e) => setBookingForm((p) => ({ ...p, paymentMethod: e.target.value }))}
-                        className="flex h-9 w-full rounded-lg border border-input bg-background px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
+                        className="flex h-9 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
                       >
                         <option value="Cash">Cash</option>
                         <option value="M-Pesa">M-Pesa</option>
@@ -407,10 +442,10 @@ export default function TicketingPage() {
                     <button
                       type="submit"
                       disabled={bookingLoading}
-                      className="flex h-9 w-full items-center justify-center rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-50 transition-colors"
+                      className="flex h-9 w-full items-center justify-center rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary/90 disabled:opacity-50 transition-colors"
                     >
                       {bookingLoading ? (
-                        <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary-foreground border-t-transparent" />
+                        <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
                       ) : (
                         'Confirm Booking'
                       )}
@@ -423,16 +458,15 @@ export default function TicketingPage() {
         </div>
       )}
 
-      {/* Trip Cards Grid */}
       {!selectedTrip && (
         <div>
-          <h2 className="mb-3 text-lg font-semibold text-foreground">Upcoming Trips</h2>
+          <h2 className="mb-3 text-lg font-semibold text-gray-900">Upcoming Trips</h2>
           {loadingTrips ? (
             <div className="flex items-center justify-center py-16">
               <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
             </div>
           ) : trips.length === 0 ? (
-            <div className="rounded-xl border border-border bg-card py-12 text-center text-sm text-muted-foreground">
+            <div className="rounded-xl border border-gray-200 bg-white py-12 text-center text-sm text-gray-500">
               No upcoming trips found
             </div>
           ) : (
@@ -443,14 +477,14 @@ export default function TicketingPage() {
                   <button
                     key={trip.id}
                     onClick={() => openSeatMap(trip)}
-                    className="rounded-xl border border-border bg-card p-4 text-left transition-all hover:border-primary/30 hover:shadow-sm"
+                    className="rounded-xl border border-gray-200 bg-white p-4 text-left transition-all hover:border-primary/30 hover:shadow-sm"
                   >
                     <div className="mb-3 flex items-start justify-between">
-                      <h3 className="font-medium text-foreground leading-snug">{trip.route}</h3>
+                      <h3 className="font-medium text-gray-900 leading-snug">{trip.route}</h3>
                       {statusBadge(trip.status)}
                     </div>
 
-                    <div className="mb-3 space-y-1 text-sm text-muted-foreground">
+                    <div className="mb-3 space-y-1 text-sm text-gray-500">
                       <div className="flex items-center gap-2">
                         <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                           <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
@@ -463,9 +497,15 @@ export default function TicketingPage() {
                         </svg>
                         <span>{formatTime(trip.departureTime)} &rarr; {formatTime(trip.arrivalTime)}</span>
                       </div>
+                      <div className="flex items-center gap-2">
+                        <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 18.75a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m3 0h6m-9 0H3.375a1.125 1.125 0 01-1.125-1.125V14.25m17.25 4.5a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m3 0h1.125c.621 0 1.129-.504 1.09-1.124a17.902 17.902 0 00-3.213-9.193 2.056 2.056 0 00-1.58-.86H14.25M16.5 18.75h-2.25m0-11.177v-.958c0-.568-.422-1.048-.987-1.106a48.554 48.554 0 00-10.026 0 1.106 1.106 0 00-.987 1.106v7.635m12-6.677v6.677m0 4.5v-4.5m0 0h-12" />
+                        </svg>
+                        <span>{trip.vehicle.registration} &middot; {trip.vehicle.make}</span>
+                      </div>
                     </div>
 
-                    <div className="flex items-center justify-between border-t border-border pt-3">
+                    <div className="flex items-center justify-between border-t border-gray-200 pt-3">
                       <span className="text-sm font-semibold text-primary">{formatCurrency(trip.baseFare)}</span>
                       <span className={`text-xs font-medium ${seatsLeft <= 5 ? 'text-red-600' : 'text-emerald-600'}`}>
                         {seatsLeft} seat{seatsLeft !== 1 ? 's' : ''} left
@@ -479,23 +519,23 @@ export default function TicketingPage() {
         </div>
       )}
 
-      {/* Recent Bookings Table */}
       {!selectedTrip && (
-        <div className="rounded-xl border border-border bg-card">
-          <div className="border-b border-border px-4 py-3">
-            <h2 className="text-lg font-semibold text-foreground">Recent Bookings</h2>
+        <div className="rounded-xl border border-gray-200 bg-white">
+          <div className="border-b border-gray-200 px-4 py-3">
+            <h2 className="text-lg font-semibold text-gray-900">Recent Bookings</h2>
           </div>
           {loadingTickets ? (
             <div className="flex items-center justify-center py-12">
               <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
             </div>
           ) : tickets.length === 0 ? (
-            <div className="py-12 text-center text-sm text-muted-foreground">No bookings yet</div>
+            <div className="py-12 text-center text-sm text-gray-500">No bookings yet</div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-border text-left text-xs font-medium text-muted-foreground">
+                  <tr className="border-b border-gray-200 text-left text-xs font-medium text-gray-500">
+                    <th className="px-4 py-3">Ticket Ref</th>
                     <th className="px-4 py-3">Passenger</th>
                     <th className="px-4 py-3">Seat</th>
                     <th className="px-4 py-3 hidden sm:table-cell">Route</th>
@@ -505,20 +545,21 @@ export default function TicketingPage() {
                     <th className="px-4 py-3">Status</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-border">
+                <tbody className="divide-y divide-gray-200">
                   {tickets.map((ticket) => (
-                    <tr key={ticket.id} className="hover:bg-muted/30">
+                    <tr key={ticket.id} className="hover:bg-gray-50">
+                      <td className="px-4 py-3 font-mono text-xs font-medium text-gray-900">{ticket.ticketRef}</td>
                       <td className="px-4 py-3">
-                        <p className="font-medium text-foreground">{ticket.passengerName}</p>
-                        <p className="text-xs text-muted-foreground">{ticket.passengerPhone}</p>
+                        <p className="font-medium text-gray-900">{ticket.passengerName}</p>
+                        <p className="text-xs text-gray-500">{ticket.passengerPhone}</p>
                       </td>
-                      <td className="px-4 py-3 font-medium text-foreground">{ticket.seatNumber}</td>
-                      <td className="px-4 py-3 text-muted-foreground hidden sm:table-cell">{ticket.route || '—'}</td>
-                      <td className="px-4 py-3 text-muted-foreground hidden md:table-cell">
-                        {ticket.travelDate ? formatDate(ticket.travelDate) : formatDate(ticket.createdAt)}
+                      <td className="px-4 py-3 font-medium text-gray-900">{ticket.seatNumber}</td>
+                      <td className="px-4 py-3 text-gray-500 hidden sm:table-cell">{ticket.trip?.route || '—'}</td>
+                      <td className="px-4 py-3 text-gray-500 hidden md:table-cell">
+                        {ticket.trip?.travelDate ? formatDate(ticket.trip.travelDate) : formatDate(ticket.createdAt)}
                       </td>
                       <td className="px-4 py-3 font-medium text-primary">{formatCurrency(ticket.fare)}</td>
-                      <td className="px-4 py-3 text-muted-foreground">{ticket.paymentMethod}</td>
+                      <td className="px-4 py-3 text-gray-500">{ticket.paymentMethod}</td>
                       <td className="px-4 py-3">{statusBadge(ticket.status)}</td>
                     </tr>
                   ))}

@@ -9,7 +9,8 @@ interface Vehicle {
   make: string;
   model: string;
   capacity: number;
-  layout: string;
+  layout: '2+2' | '2+1';
+  routeId: string;
   homeStation: string;
   driverName: string;
   conductorName: string;
@@ -17,33 +18,53 @@ interface Vehicle {
   insuranceExpiry: string;
   ntsaExpiry: string;
   tlbExpiry: string;
-  status: string;
+  status: 'active' | 'maintenance' | 'retired';
+  createdAt: string;
+  updatedAt: string;
 }
 
 interface Trip {
   id: string;
-  route: string;
   vehicleId: string;
+  route: string;
   departureTime: string;
   arrivalTime: string;
   travelDate: string;
+  baseFare: number;
   totalSeats: number;
   bookedSeats: number;
-  status: string;
+  status: 'scheduled' | 'boarding' | 'departed' | 'in_transit' | 'arrived' | 'cancelled';
+  vehicle: { id: string; registration: string; make: string; model: string };
+  createdAt: string;
+  updatedAt: string;
 }
 
-interface ComplianceAlert {
-  vehicleId: string;
-  registration: string;
+interface VehicleCompliance {
+  vehicle: string;
   type: string;
-  message: string;
-  expiryDate: string;
-  daysRemaining: number;
+  severity: 'danger' | 'warning';
+  due: string;
+}
+
+interface CrewCompliance {
+  employee: string;
+  role: string;
+  documentType: string;
+  severity: 'danger' | 'warning';
+  due: string;
+}
+
+interface FleetStats {
+  totalVehicles: number;
+  activeVehicles: number;
+  maintenanceVehicles: number;
+  activeTrips: number;
+  upcomingTrips: number;
 }
 
 const VEHICLE_STATUS_COLORS: Record<string, string> = {
   active: 'bg-emerald-100 text-emerald-700',
-  maintenance: 'bg-amber-100 text-amber-700',
+  maintenance: 'bg-yellow-100 text-yellow-700',
   retired: 'bg-gray-100 text-gray-600',
 };
 
@@ -51,9 +72,14 @@ const TRIP_STATUS_COLORS: Record<string, string> = {
   scheduled: 'bg-blue-100 text-blue-700',
   boarding: 'bg-yellow-100 text-yellow-700',
   departed: 'bg-orange-100 text-orange-700',
-  in_transit: 'bg-yellow-100 text-yellow-700',
+  in_transit: 'bg-amber-100 text-amber-700',
   arrived: 'bg-emerald-100 text-emerald-700',
   cancelled: 'bg-red-100 text-red-700',
+};
+
+const SEVERITY_COLORS: Record<string, string> = {
+  danger: 'border-red-200 bg-red-50 text-red-700',
+  warning: 'border-amber-200 bg-amber-50 text-amber-700',
 };
 
 function StatusBadge({ status, colorMap }: { status: string; colorMap: Record<string, string> }) {
@@ -87,7 +113,9 @@ export default function FleetPage() {
   const [activeTab, setActiveTab] = useState<'vehicles' | 'trips'>('vehicles');
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [trips, setTrips] = useState<Trip[]>([]);
-  const [complianceAlerts, setComplianceAlerts] = useState<ComplianceAlert[]>([]);
+  const [vehicleCompliance, setVehicleCompliance] = useState<VehicleCompliance[]>([]);
+  const [crewCompliance, setCrewCompliance] = useState<CrewCompliance[]>([]);
+  const [stats, setStats] = useState<FleetStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -98,21 +126,28 @@ export default function FleetPage() {
     make: '',
     model: '',
     capacity: '',
-    layout: '2+2',
+    layout: '2+2' as '2+2' | '2+1',
+    homeStation: '',
+    driverName: '',
+    conductorName: '',
   });
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
-      const [vehiclesData, tripsData, complianceData] = await Promise.all([
+      const [vehiclesData, tripsData, vehicleComp, crewComp, statsData] = await Promise.all([
         api.get('/fleet/vehicles'),
         api.get('/fleet/trips'),
         api.get('/fleet/compliance'),
+        api.get('/fleet/compliance/crew'),
+        api.get('/fleet/stats'),
       ]);
       setVehicles(vehiclesData);
       setTrips(tripsData);
-      setComplianceAlerts(complianceData);
+      setVehicleCompliance(vehicleComp);
+      setCrewCompliance(crewComp);
+      setStats(statsData);
     } catch (err: any) {
       setError(err.response?.data?.message || 'Failed to load fleet data');
     } finally {
@@ -130,11 +165,26 @@ export default function FleetPage() {
     setError('');
     try {
       await api.post('/fleet/vehicles', {
-        ...newVehicle,
+        registration: newVehicle.registration,
+        make: newVehicle.make,
+        model: newVehicle.model,
         capacity: Number(newVehicle.capacity),
+        layout: newVehicle.layout,
+        homeStation: newVehicle.homeStation || undefined,
+        driverName: newVehicle.driverName || undefined,
+        conductorName: newVehicle.conductorName || undefined,
       });
       setShowAddModal(false);
-      setNewVehicle({ registration: '', make: '', model: '', capacity: '', layout: '2+2' });
+      setNewVehicle({
+        registration: '',
+        make: '',
+        model: '',
+        capacity: '',
+        layout: '2+2',
+        homeStation: '',
+        driverName: '',
+        conductorName: '',
+      });
       fetchData();
     } catch (err: any) {
       setError(err.response?.data?.message || 'Failed to add vehicle');
@@ -142,6 +192,11 @@ export default function FleetPage() {
       setSubmitting(false);
     }
   };
+
+  const allComplianceAlerts = [
+    ...vehicleCompliance.map((a) => ({ label: a.vehicle, sub: a.type, severity: a.severity, due: a.due })),
+    ...crewCompliance.map((a) => ({ label: `${a.employee} (${a.role})`, sub: a.documentType, severity: a.severity, due: a.due })),
+  ];
 
   return (
     <div className="space-y-6">
@@ -161,33 +216,44 @@ export default function FleetPage() {
         </div>
       )}
 
-      {complianceAlerts.length > 0 && (
+      {stats && (
+        <div className="grid gap-4 grid-cols-2 sm:grid-cols-5">
+          {[
+            { label: 'Total Vehicles', value: stats.totalVehicles },
+            { label: 'Active', value: stats.activeVehicles, color: 'text-emerald-600' },
+            { label: 'Maintenance', value: stats.maintenanceVehicles, color: 'text-yellow-600' },
+            { label: 'Active Trips', value: stats.activeTrips, color: 'text-blue-600' },
+            { label: 'Upcoming Trips', value: stats.upcomingTrips, color: 'text-primary' },
+          ].map((s) => (
+            <div key={s.label} className="rounded-lg border border-border bg-card p-4">
+              <p className="text-xs text-muted-foreground">{s.label}</p>
+              <p className={`text-2xl font-semibold mt-1 ${s.color || 'text-foreground'}`}>{s.value}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {allComplianceAlerts.length > 0 && (
         <div className="space-y-2">
           <h2 className="text-sm font-medium text-foreground flex items-center gap-2">
             <svg className="h-4 w-4 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
             </svg>
-            Compliance Alerts
+            Compliance Alerts ({allComplianceAlerts.length})
           </h2>
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-            {complianceAlerts.map((alert, idx) => (
+            {allComplianceAlerts.map((alert, idx) => (
               <div
                 key={idx}
-                className={`rounded-lg border p-3 text-sm ${
-                  alert.daysRemaining <= 30
-                    ? 'border-red-200 bg-red-50'
-                    : 'border-amber-200 bg-amber-50'
-                }`}
+                className={`rounded-lg border p-3 text-sm ${SEVERITY_COLORS[alert.severity] || SEVERITY_COLORS.warning}`}
               >
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
-                    <p className="font-medium text-foreground">{alert.registration}</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">{alert.message}</p>
+                    <p className="font-medium text-foreground">{alert.label}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">{alert.sub}</p>
                   </div>
-                  <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${
-                    alert.daysRemaining <= 30 ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
-                  }`}>
-                    {alert.daysRemaining}d
+                  <span className="shrink-0 text-xs font-medium">
+                    {new Date(alert.due).toLocaleDateString()}
                   </span>
                 </div>
               </div>
@@ -277,7 +343,7 @@ export default function FleetPage() {
                     </div>
                   </div>
 
-                  <div className="mt-4 grid grid-cols-3 gap-2 border-t border-border pt-3">
+                  <div className="mt-4 grid grid-cols-4 gap-2 border-t border-border pt-3">
                     <div className="text-center">
                       <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Service</p>
                       <p className={`text-xs font-medium ${vehicle.nextServiceDate && new Date(vehicle.nextServiceDate) < new Date(Date.now() + 30 * 86400000) ? 'text-amber-600' : 'text-foreground'}`}>
@@ -294,6 +360,12 @@ export default function FleetPage() {
                       <p className="text-[10px] uppercase tracking-wide text-muted-foreground">NTSA</p>
                       <p className={`text-xs font-medium ${vehicle.ntsaExpiry && new Date(vehicle.ntsaExpiry) < new Date(Date.now() + 30 * 86400000) ? 'text-amber-600' : 'text-foreground'}`}>
                         {vehicle.ntsaExpiry ? new Date(vehicle.ntsaExpiry).toLocaleDateString() : '—'}
+                      </p>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-[10px] uppercase tracking-wide text-muted-foreground">TLB</p>
+                      <p className={`text-xs font-medium ${vehicle.tlbExpiry && new Date(vehicle.tlbExpiry) < new Date(Date.now() + 30 * 86400000) ? 'text-amber-600' : 'text-foreground'}`}>
+                        {vehicle.tlbExpiry ? new Date(vehicle.tlbExpiry).toLocaleDateString() : '—'}
                       </p>
                     </div>
                   </div>
@@ -315,6 +387,7 @@ export default function FleetPage() {
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">Date</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">Departure</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">Seats</th>
+                    <th className="px-4 py-3 text-left font-medium text-muted-foreground">Vehicle</th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">Status</th>
                   </tr>
                 </thead>
@@ -329,6 +402,9 @@ export default function FleetPage() {
                       <td className="px-4 py-3 text-muted-foreground">
                         <span className="font-medium text-foreground">{trip.bookedSeats}</span>
                         <span className="text-muted-foreground">/{trip.totalSeats}</span>
+                      </td>
+                      <td className="px-4 py-3 text-muted-foreground">
+                        {trip.vehicle.registration}
                       </td>
                       <td className="px-4 py-3">
                         <StatusBadge status={trip.status} colorMap={TRIP_STATUS_COLORS} />
@@ -410,12 +486,44 @@ export default function FleetPage() {
                   <label className="mb-1.5 block text-sm font-medium text-foreground">Layout</label>
                   <select
                     value={newVehicle.layout}
-                    onChange={(e) => setNewVehicle({ ...newVehicle, layout: e.target.value })}
+                    onChange={(e) => setNewVehicle({ ...newVehicle, layout: e.target.value as '2+2' | '2+1' })}
                     className="flex h-10 w-full rounded-lg border border-input bg-background px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
                   >
                     <option value="2+2">2+2</option>
                     <option value="2+1">2+1</option>
                   </select>
+                </div>
+              </div>
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-foreground">Home Station</label>
+                <input
+                  type="text"
+                  value={newVehicle.homeStation}
+                  onChange={(e) => setNewVehicle({ ...newVehicle, homeStation: e.target.value })}
+                  placeholder="e.g. Nairobi"
+                  className="flex h-10 w-full rounded-lg border border-input bg-background px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="mb-1.5 block text-sm font-medium text-foreground">Driver Name</label>
+                  <input
+                    type="text"
+                    value={newVehicle.driverName}
+                    onChange={(e) => setNewVehicle({ ...newVehicle, driverName: e.target.value })}
+                    placeholder="Optional"
+                    className="flex h-10 w-full rounded-lg border border-input bg-background px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-sm font-medium text-foreground">Conductor Name</label>
+                  <input
+                    type="text"
+                    value={newVehicle.conductorName}
+                    onChange={(e) => setNewVehicle({ ...newVehicle, conductorName: e.target.value })}
+                    placeholder="Optional"
+                    className="flex h-10 w-full rounded-lg border border-input bg-background px-3 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
+                  />
                 </div>
               </div>
 
